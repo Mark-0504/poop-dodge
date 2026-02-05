@@ -110,16 +110,32 @@
       this.poopPool=new Pool(()=>new Poop()); this.powerPool=new Pool(()=>new PowerUp());
       this.poops=[]; this.powers=[];
       this.score=0; this.best=Storage.getBest();
-      this.spawnTimer=0; this.spawnInterval=0.9; this.level=1; // level is difficulty gauge
+      this.spawnTimer=0; this.spawnInterval=0.9; this.level=1; // kept for compatibility
       this.alive=false; this.paused=false; this.slowmo=0; this.playerName = Storage.getName();
       this.input={left:false,right:false,dragX:null};
       this.last=now(); this.onFrame=this.onFrame.bind(this);
       this.bindInput(); this.bindVisibility(); this.updateHUD();
-      // Initial renders
       renderBoard(document.getElementById('leaderboard-list'), Storage.getBoard());
       const nameInput = document.getElementById('player-name');
       if(nameInput){ nameInput.value = this.playerName; }
       this.loadGlobalBoards();
+
+      // Difficulty params (score-based, exponential by tier = floor(score/50))
+      this.diffBase = { interval: 0.9, speed: 140, duo: 0.15, power: 0.14 };
+      this.diffClamp = { intervalMin: 0.12, duoMax: 0.6, powerMin: 0.03 };
+      this.diffRate  = { interval: 0.86, speed: 1.12, duo: 1.18, power: 0.88 }; // per tier
+      this.lastTier = 0; // for optional feedback
+    }
+
+    getTier(){ return Math.floor((this.score|0) / 50); }
+    getDifficulty(){
+      const tier = this.getTier();
+      const b = this.diffBase, r = this.diffRate, c = this.diffClamp;
+      const interval = Math.max(c.intervalMin, b.interval * Math.pow(r.interval, tier));
+      const speed    = b.speed * Math.pow(r.speed, tier);
+      const duoProb  = Math.min(c.duoMax, b.duo * Math.pow(r.duo, tier));
+      const pwrProb  = Math.max(c.powerMin, b.power * Math.pow(r.power, tier));
+      return { tier, interval, speed, duoProb, pwrProb };
     }
 
     async loadGlobalBoards(){
@@ -178,40 +194,39 @@
       rankLine.textContent = result.rank? `${this.playerName}님 랭킹 ${result.rank}위!` : `${this.playerName}님의 점수가 기록되었습니다.`;
       renderBoard(document.getElementById('leaderboard-list-final'), result.board);
       renderBoard(document.getElementById('leaderboard-list'), result.board);
-      // Global submit + refresh (errors are logged in console)
       await submitGlobalScore(this.playerName||'Player', this.score|0);
       await this.loadGlobalBoards();
       document.getElementById('gameover-screen')?.classList.add('visible');
     }
 
     reset(){
-      this.score=0; this.level=1; this.spawnInterval=0.9; this.spawnTimer=0; this.slowmo=0;
+      this.score=0; this.level=1; this.spawnInterval=this.diffBase.interval; this.spawnTimer=0; this.slowmo=0;
       this.player.x=this.w/2-17; this.player.y=this.h-56; this.player.shield=0;
       for(const p of this.poops) this.poopPool.put(p); this.poops.length=0;
       for(const p of this.powers) this.powerPool.put(p); this.powers.length=0;
       this.last=now(); this.paused=false; this.updateHUD();
+      this.lastTier = 0;
     }
 
-    // Progressive difficulty
+    // Score-based exponential difficulty (tier = floor(score/50))
     spawn(){
-      this.level += 0.02;
-      const spawnMin = 0.16;
-      const spawnBase = 0.9;
-      this.spawnInterval = Math.max(spawnMin, spawnBase - this.level*0.055);
-      const speed = 120 + this.level*22;
-      const duoProb = Math.min(0.35, 0.15 + this.level*0.03);
-      const count = Math.random()<duoProb?2:1;
+      const d = this.getDifficulty();
+      this.spawnInterval = d.interval;
+      const count = Math.random() < d.duoProb ? 2 : 1;
       for(let i=0;i<count;i++){
         const p=this.poopPool.get();
-        p.spawn(rand(0,this.w-24), -rand(24,140), speed*rand(0.9,1.3));
+        p.spawn(rand(0,this.w-24), -rand(24,140), d.speed*rand(0.9,1.25));
         this.poops.push(p);
       }
-      if(Math.random()<Math.max(0.06, 0.14 - this.level*0.01)){
+      // Power-up spawn (rarer as score grows)
+      if(Math.random() < d.pwrProb){
         const t=Math.random()<0.6?'shield':'slow';
         const pu=this.powerPool.get();
         pu.spawn(rand(0,this.w-20), -40, t);
         this.powers.push(pu);
       }
+      // optional tier up feedback
+      if(d.tier>this.lastTier){ this.lastTier=d.tier; Audio.beep(880,0.06,'triangle',0.12); }
     }
 
     step(dt){
