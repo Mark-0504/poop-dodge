@@ -158,13 +158,23 @@
     getTier(){ return Math.floor((this.score|0) / 50); }
     getDifficulty(){
       const tier = this.getTier();
-      const b = { interval: 0.9, speed: 140, duo: 0.15, power: 0.14 };
-      const r = { interval: 0.86, speed: 1.12, duo: 1.18, power: 0.88 };
-      const c = { intervalMin: 0.12, duoMax: 0.6, powerMin: 0.03 };
-      const interval = Math.max(c.intervalMin, b.interval * Math.pow(r.interval, tier));
-      const speed    = b.speed * Math.pow(r.speed, tier);
-      const duoProb  = Math.min(c.duoMax, b.duo * Math.pow(r.duo, tier));
-      const pwrProb  = Math.max(c.powerMin, b.power * Math.pow(r.power, tier));
+      // 기본 난이도 곡선(점수에 따라 점점 빨라지고 자주 떨어짐)
+      const b = { interval: 0.9, speed: 140, duo: 0.16, power: 0.14 };
+      const r = { interval: 0.82, speed: 1.16, duo: 1.22, power: 0.9 };
+      const c = { intervalMin: 0.08, duoMax: 0.7, powerMin: 0.03 };
+
+      let interval = Math.max(c.intervalMin, b.interval * Math.pow(r.interval, tier));
+      let speed    = b.speed * Math.pow(r.speed, tier);
+      let duoProb  = Math.min(c.duoMax, b.duo * Math.pow(r.duo, tier));
+      let pwrProb  = Math.max(c.powerMin, b.power * Math.pow(r.power, tier));
+
+      // 50점(1티어) 이상부터는 체감되게 한 번 더 확 올려준다.
+      if(tier >= 1){
+        interval *= 0.7;          // 더 자주 떨어지게
+        speed *= 1.35;            // 낙하 속도 크게 증가
+        duoProb = Math.min(c.duoMax, duoProb + 0.18); // 동시에 여러 개 나올 확률 증가
+      }
+
       return { tier, interval, speed, duoProb, pwrProb };
     }
 
@@ -272,7 +282,7 @@
       for(let i=this.poops.length-1;i>=0;i--){
         const p=this.poops[i];
         p.step(dt*(this.slowmo>0?0.5:1));
-        if(p.y>floor+60){ this.poops.splice(i,1); this.poopPool.put(p); this.score += 1; this.updateHUD(); }
+        if(p.y>floor+60){ this.poops.splice(i,1); this.poopPool.put(p); this.score += 5; this.updateHUD(); }
       }
       for(let i=this.powers.length-1;i>=0;i--){
         const p=this.powers[i];
