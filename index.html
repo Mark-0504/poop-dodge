@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>똥피하기 💩</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0b1020;
+      --fg: #f2f5ff;
+      --accent: #7c4dff;
+      --good: #26c281;
+      --bad: #ff5252;
+      --panel: color-mix(in oklab, var(--bg) 80%, white);
+    }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: radial-gradient(1200px 800px at 70% -20%, #1a2650 0%, var(--bg) 55%);
+      color: var(--fg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif;
+      overflow: hidden;
+    }
+    #hud {
+      position: fixed; inset: 0; pointer-events: none; display: grid; grid-template-rows: auto 1fr auto; padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom) 16px;
+    }
+    #topbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+    .pill { background: color-mix(in oklab, var(--panel), white 6%); border: 1px solid color-mix(in oklab, var(--panel), white 12%); padding: 8px 12px; border-radius: 999px; font-weight: 600; backdrop-filter: blur(6px); }
+    #score { font-variant-numeric: tabular-nums; }
+    #center { display: grid; place-items: center; }
+    #overlay {
+      pointer-events: auto; text-align: center; max-width: min(560px, 90vw); background: color-mix(in oklab, var(--panel), black 6%);
+      border: 1px solid color-mix(in oklab, var(--panel), white 10%); border-radius: 16px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.35);
+      animation: pop .35s ease both;
+    }
+    @keyframes pop { from { transform: translateY(8px) scale(.98); opacity: 0 } to { transform: none; opacity: 1 } }
+    h1 { margin: 6px 0 10px; font-size: clamp(22px, 3.4vw, 32px); }
+    p { margin: 8px 0; opacity: .9; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; pointer-events: auto; cursor: pointer; user-select: none;
+      color: white; background: linear-gradient(180deg, color-mix(in oklab, var(--accent), white 18%), var(--accent));
+      border: none; border-radius: 12px; padding: 12px 16px; font-weight: 700; box-shadow: 0 8px 24px rgba(124,77,255,.35);
+    }
+    .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+    #canvas { width: 100vw; height: 100vh; display: block; }
+    .hint { font-size: 13px; opacity: .75; }
+    #controls { display: none; position: fixed; inset: auto 0 12px; display: flex; gap: 16px; justify-content: center; pointer-events: none; }
+    .ctl { pointer-events: auto; width: 64px; height: 64px; border-radius: 50%; background: color-mix(in oklab, var(--panel), white 6%); border: 1px solid color-mix(in oklab, var(--panel), white 14%); display: grid; place-items: center; font-size: 28px; }
+    @media (max-width: 820px) { #controls { display: flex } }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" aria-label="똥피하기 게임 화면" role="img"></canvas>
+  <div id="hud" aria-live="polite">
+    <div id="topbar">
+      <div class="pill">똥피하기 💩</div>
+      <div class="pill" id="score">점수 0 · 최고 0</div>
+    </div>
+    <div id="center">
+      <div id="overlay" role="dialog" aria-modal="true">
+        <h1>똥을 피해 오래 살아남기 💨</h1>
+        <p>좌우로 움직여 떨어지는 💩을 피하세요.</p>
+        <p class="hint">PC: ← → / A D / 마우스 드래그  /  모바일: 좌우 버튼</p>
+        <div class="row"><button id="startBtn" class="btn">시작하기</button></div>
+      </div>
+    </div>
+    <div></div>
+  </div>
+  <div id="controls">
+    <button id="left" class="ctl" aria-label="왼쪽으로 이동">◀</button>
+    <button id="right" class="ctl" aria-label="오른쪽으로 이동">▶</button>
+  </div>
+<script>
+(() => {
+  const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const hudScore = document.getElementById('score');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const leftBtn = document.getElementById('left');
+  const rightBtn = document.getElementById('right');
+
+  let W = 0, H = 0;
+  function resize() {
+    W = Math.floor(window.innerWidth);
+    H = Math.floor(window.innerHeight);
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize, { passive: true });
+  resize();
+
+  const state = {
+    running: false,
+    time: 0,
+    score: 0,
+    best: Number(localStorage.getItem('poop_best') || 0),
+  };
+
+  const player = {
+    x: 0,
+    y: 0,
+    r: 20,
+    speed: 480, // px/s
+    color: '#26c281'
+  };
+
+  const inputs = { left: false, right: false, pointerId: null };
+
+  const poops = [];
+  function spawnPoop() {
+    const size = rand(24, 56) * (W < 420 ? 0.9 : 1);
+    const speed = rand(120, 240) + Math.min(280, state.time * 0.08);
+    const x = rand(size * 0.6, W - size * 0.6);
+    const rot = rand(-Math.PI, Math.PI);
+    const spin = rand(-2, 2) * 0.7;
+    poops.push({ x, y: -size, size, speed, rot, spin });
+  }
+
+  let spawnTimer = 0;
+  function update(dt) {
+    if (!state.running) return;
+    state.time += dt;
+    state.score += dt * 10;
+
+    const accel = 1 + Math.min(1.6, state.time / 60);
+    const spawnGap = Math.max(0.22, 0.9 - state.time * 0.01);
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnPoop();
+      spawnTimer = spawnGap;
+      if (Math.random() < Math.min(0.25, state.time / 40)) spawnPoop();
+    }
+
+    let dir = 0;
+    if (inputs.left) dir -= 1;
+    if (inputs.right) dir += 1;
+    player.x += dir * player.speed * accel * dt;
+    player.x = clamp(player.x, player.r, W - player.r);
+
+    for (let i = poops.length - 1; i >= 0; i--) {
+      const p = poops[i];
+      p.y += p.speed * accel * dt;
+      p.rot += p.spin * dt;
+      if (p.y - p.size > H + 40) poops.splice(i, 1);
+    }
+
+    // collisions
+    for (const p of poops) {
+      const pr = p.size * 0.34; // approximate radius for emoji
+      const dx = p.x - player.x;
+      const dy = (p.y - p.size * 0.3) - player.y; // anchor slightly up
+      const d2 = dx*dx + dy*dy;
+      const rr = (player.r + pr) * (player.r + pr);
+      if (d2 <= rr) {
+        gameOver();
+        break;
+      }
+    }
+
+    hudScore.textContent = `점수 ${Math.floor(state.score)} · 최고 ${Math.floor(state.best)}`;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // background stars
+    const t = state.time;
+    for (let i = 0; i < 40; i++) {
+      const x = (i * 97) % W;
+      const y = (i * 53 + (t * 30) % H) % H;
+      ctx.fillStyle = `hsla(${180 + i * 3}, 70%, ${30 + (i%5)*4}%, 0.2)`;
+      ctx.fillRect(x, y, 2, 2);
+    }
+
+    // player
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
+    ctx.fillStyle = player.color;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,.15)';
+    ctx.stroke();
+
+    // poops
+    for (const p of poops) {
+      drawPoop(p);
+    }
+  }
+
+  function drawPoop(p) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    const s = p.size;
+    // shadow
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.ellipse(0, s*0.5, s*0.5, s*0.18, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // emoji text
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${Math.floor(s)}px "Noto Color Emoji", Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji`;
+    ctx.fillText('💩', 0, 0);
+    ctx.restore();
+  }
+
+  function loop(ts) {
+    if (last === 0) last = ts;
+    const dt = Math.min(0.033, (ts - last) / 1000);
+    last = ts;
+    update(dt);
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function startGame() {
+    state.running = true;
+    state.time = 0; state.score = 0;
+    poops.length = 0;
+    spawnTimer = 0.2;
+    overlay && (overlay.style.display = 'none');
+    hudScore.textContent = `점수 0 · 최고 ${Math.floor(state.best)}`;
+  }
+  function gameOver() {
+    state.running = false;
+    state.best = Math.max(state.best, Math.floor(state.score));
+    localStorage.setItem('poop_best', String(state.best));
+    showOverlay();
+  }
+
+  function showOverlay() {
+    const center = document.getElementById('center');
+    if (!center) return;
+    const isRestart = overlay; // reuse existing block
+    const scoreLine = `이번 점수 ${Math.floor(state.score)} · 최고 ${Math.floor(state.best)}`;
+    if (overlay) {
+      overlay.innerHTML = `
+        <h1>게임 종료 💥</h1>
+        <p>${scoreLine}</p>
+        <p class="hint">다시 도전해 보세요!</p>
+        <div class="row"><button id="restart" class="btn">다시 시작</button></div>
+      `;
+      overlay.style.display = 'block';
+      document.getElementById('restart').addEventListener('click', startGame);
+    }
+  }
+
+  // input handlers
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') inputs.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') inputs.right = true;
+  });
+  window.addEventListener('keyup', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') inputs.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') inputs.right = false;
+    if (!state.running && (e.key === ' ' || e.key === 'Enter')) startGame();
+  });
+
+  // pointer drag
+  canvas.addEventListener('pointerdown', e => {
+    inputs.pointerId = e.pointerId; canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (inputs.pointerId === e.pointerId) {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      player.x = clamp(x, player.r, W - player.r);
+    }
+  });
+  canvas.addEventListener('pointerup', e => { if (inputs.pointerId === e.pointerId) inputs.pointerId = null; });
+
+  // mobile controls
+  leftBtn.addEventListener('pointerdown', () => inputs.left = true);
+  leftBtn.addEventListener('pointerup', () => inputs.left = false);
+  rightBtn.addEventListener('pointerdown', () => inputs.right = true);
+  rightBtn.addEventListener('pointerup', () => inputs.right = false);
+
+  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+  function rand(a, b) { return Math.random() * (b - a) + a; }
+
+  let last = 0, raf = 0;
+  function init() {
+    player.x = W * 0.5; player.y = H - 80;
+    cancelAnimationFrame(raf);
+    last = 0; raf = requestAnimationFrame(loop);
+  }
+
+  startBtn?.addEventListener('click', startGame);
+  init();
+})();
+</script>
+</body>
+</html>
