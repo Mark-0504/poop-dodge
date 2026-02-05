@@ -35,8 +35,18 @@
       if(error) throw error;
       return Array.isArray(data) ? data : [];
     } catch(e){
-      console.warn('Global board fetch failed', e);
-      return [];
+      console.warn('[GlobalBoard] primary query failed, fallback without created_at', e?.message||e);
+      try {
+        const { data, error } = await sb.from('scores')
+          .select('name,score')
+          .order('score', { ascending: false })
+          .limit(10);
+        if(error) throw error;
+        return Array.isArray(data) ? data : [];
+      } catch (e2) {
+        console.error('[GlobalBoard] fallback query failed', e2?.message||e2);
+        return [];
+      }
     }
   }
 
@@ -49,7 +59,7 @@
       if(error) throw error;
       return { ok:true };
     } catch(e){
-      console.warn('Global score submit failed', e);
+      console.error('[GlobalSubmit] failed', e);
       return { ok:false, error:e };
     }
   }
@@ -162,15 +172,13 @@
     async gameover(){
       this.alive=false;
       document.getElementById('final-score').textContent=this.score|0;
-      // Update best
       if(this.score>this.best){ this.best=this.score; Storage.setBest(this.best); this.updateHUD(); }
-      // Local submit
       const result = submitScore(this.playerName||'Player', this.score|0);
       const rankLine = document.getElementById('rank-line');
       rankLine.textContent = result.rank? `${this.playerName}님 랭킹 ${result.rank}위!` : `${this.playerName}님의 점수가 기록되었습니다.`;
       renderBoard(document.getElementById('leaderboard-list-final'), result.board);
       renderBoard(document.getElementById('leaderboard-list'), result.board);
-      // Global submit + refresh
+      // Global submit + refresh (errors are logged in console)
       await submitGlobalScore(this.playerName||'Player', this.score|0);
       await this.loadGlobalBoards();
       document.getElementById('gameover-screen')?.classList.add('visible');
